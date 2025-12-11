@@ -1,0 +1,702 @@
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-nodecimaldot]{babel}
+\usepackage[letterpaper,margin=1in]{geometry}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{csquotes}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{appendix}
+
+\sisetup{round-mode=places,round-precision=3,detect-weight=true,detect-inline-weight=math}
+
+
+\title{Predicción de ausentismo a citas médicas con aprendizaje de máquinas: \\
+un estudio con datos reales de Brasil}
+
+\author{Carlos Castillo}
+
+\newtheorem{prop}{Proposición}
+
+\newcommand{\AUC}{\mathrm{AUC}}
+\newcommand{\AP}{\mathrm{AP}}
+\newcommand{\PrecisionAt}[1]{\mathrm{P@{#1}}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Se presenta un estudio de predicción de \emph{no-shows} en atención ambulatoria utilizando modelos tabulares (regresión logística y Random Forest). Empleamos un conjunto de datos real de 110{,}527 citas (Vitória, Brasil), con prevalencia de \emph{no-show} de \SI{20.19}{\percent}. Mostramos resultados de validación cruzada y en prueba  (ROC-AUC, PR-AUC) y, para evaluación orientada a operación, reportamos \(\PrecisionAt{10\%}\) y \(\PrecisionAt{20\%}\). Los modelos se implementan en un pipeline reproducible de scikit-learn. También esbozamos un protocolo de datos sintéticos para futuras pruebas controladas. 
+\end{abstract}
+
+\section{Introducción}
+
+\noindent Las ausencias a cita (\emph{no-shows}) constituyen un shock operativo persistente en la atención ambulatoria: reducen la productividad, generan capacidad ociosa difícil de reasignar y deterioran la continuidad del cuidado, con consecuencias clínicas y económicas no triviales (Hasvold \& Wootton, 2011, Salazar et al., 2022). Además, el ausentismo no es aleatorio: suele correlacionarse con variables observables registradas al agendamiento (edad, barrio, franja horaria, tiempo de espera entre programación y atención), lo que abre la puerta a modelos predictivos útiles en la práctica (Salazar et al., 2022).
+
+\noindent Dos cuerpos de evidencia motivan este estudio. Por un lado, la literatura de recordatorios muestra que los mensajes de texto (SMS) incrementan la asistencia frente a no recordar y, a menudo, con costos menores que las llamadas telefónicas, aunque con heterogeneidad entre contextos y calidad de evidencia baja–moderada (Gurol-Urganci et al., 2013, Hasvold \& Wootton, 2011). Por otro lado, trabajos recientes en aprendizaje de máquinas (ML) documentan que, con un preprocesamiento cuidadoso y métricas de evaluación adecuadas al desbalance, los modelos tabulares logran desempeños competitivos para priorizar pacientes con alto riesgo de \emph{no-show} en entornos reales (Liu et al., 2022, Salazar et al., 2022).
+
+\noindent Este artículo se enfoca en la componente predictiva con datos reales. Usando un conjunto público de 110{,}527 citas ambulatorias de Vitória (Brasil), construimos un pipeline reproducible con dos clasificadores de referencia: regresión logística y Random Forest, y un preprocesamiento explícito (codificación one-hot en categóricas y paso directo en numéricas). Se reportan métricas globales (ROC-AUC, PR-AUC) y métricas de priorización operativa \((\mathrm{Precision@}k)\), que capturan cuántos \emph{no-shows} se concentran en el top-\(k\) de riesgo cuando la capacidad de intervención es limitada (Vickers \& Elkin, 2006). 
+
+\noindent Deliberadamente, \textbf{no} se abordan cuestiones causales (ex, sesgo de selección en el envío histórico de SMS) ni se proponen reglas de asignación, esas preguntas cruciales para traducir \emph{scores} en decisiones requieren diseños experimentales o métodos causales específicos y se dejan para trabajo futuro. El objetivo en esta etapa es fijar una línea base clara, reproducible y evaluada fuera de muestra que pueda integrarse, sin fricción, a flujos institucionales.
+
+
+
+\section{Datos}
+
+\subsection{Fuente, limpieza y variables}
+Se usa el conjunto público \textit{Medical Appointment No Shows} (\(110{,}527\) filas, \(14\) columnas) y, tras la limpieza mínima (estandarización de encabezados y tipos, derivación de \texttt{wait\_days}, \texttt{appt\_weekday}, \texttt{sched\_hour}, eliminación de 1 edad negativa), se trabaja con \(110{,}526\) registros.
+La etiqueta es \texttt{no\_show} (\(1=\) no asistió, \(0=\) asistió). El balance final se muestra en la Tabla~\ref{tab:balance} (prevalencia \(\approx\SI{20.19}{\percent}\)).
+
+\begin{table}[h]
+  \centering
+  \caption{Balance de clases (muestra final).}
+  \label{tab:balance}
+  \begin{tabular}{lrr}
+    \toprule
+    \textbf{Clase} & \textbf{Conteo} & \textbf{Proporción} \\
+    \midrule
+    Asistió (\(y{=}0\)) & 88{,}207 & 0.7981 \\
+    No-show (\(y{=}1\)) & 22{,}319 & 0.2019 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Variables usadas:}
+Numéricas: \texttt{age}, \texttt{handcap} (ordinal \(0\)–\(4\)), \texttt{wait\_days}, \texttt{sched\_hour}. 
+Dummies: \texttt{scholarship}, \texttt{hipertension}, \texttt{diabetes}, \texttt{alcoholism}, \texttt{sms\_received}.
+Categóricas: \texttt{gender} (F/M), \texttt{neighbourhood} (\(\sim 81\) niveles), \texttt{appt\_weekday} (en el archivo aparecen 6 días, no hay domingo).
+
+\subsection{Evidencia descriptiva y exploración visual}
+
+\noindent La \autoref{fig:distribuciones} resume las distribuciones marginales de todas las variables del conjunto de datos ya depurado. En \texttt{age} se observa el patrón típico de atención ambulatoria: una masa principal entre $\sim$20 y 70 años, presencia de niños y adultos mayores, y algunos valores extremos altos ($\geq 100$). En \texttt{wait\_days} la distribución es marcadamente asimétrica a la derecha: la mayoría de las citas se programan con esperas cortas y existe una cola de esperas largas (decenas de días), compatible con agendas por cupos. \texttt{sched\_hour} exhibe la naturaleza discreta de la programación (horas enteras entre 6:00 y 20:00, con picos en la mañana), lo que anticipa bandas horizontales en relaciones bivariadas. \texttt{handcap} es una variable ordinal fuertemente cero–inflada (casi todo en 0, pocos casos en 1–4), para modelos lineales conviene considerar codificación ordinal explícita o una versión binaria ($\geq 1$). Entre las categóricas, \texttt{gender} está desbalanceada a favor de mujeres (fenómeno habitual en APS) y \texttt{appt\_weekday} muestra seis niveles (lunes–sábado), sin programaciones en domingo en esta base.\texttt{neighbourhood} tiene cardinalidad moderada (\(\approx 81\) niveles). Aunque es manejable con \emph{one-hot}, usamos \texttt{handle\_unknown="ignore"} para garantizar robustez ante categorías no vistas en evaluación/despliegue. Las dummies clínicas (\texttt{hipertension}, \texttt{diabetes}, \texttt{alcoholism}) son poco prevalentes coherente con registros poblacionales y previsiblemente aportarán señal en interacción con edad más que de forma marginal. Finalmente, \texttt{sms\_received} aparece escasa y desbalanceada hacia 0.
+
+\noindent La matriz de correlaciones de Spearman en la \autoref{fig:corr} confirma baja colinealidad global y tres asociaciones de magnitud relevante: (i) \texttt{wait\_days}–\texttt{sms\_received} $\rho \approx 0.57$, consistente con que esperas largas activan más recordatorios, (ii) \texttt{age}–\texttt{hipertension} $\rho \approx 0.50$, y (iii) \texttt{age}–\texttt{diabetes} $\rho \approx 0.29$, patrones clínicamente plausibles. El resto de correlaciones es pequeño en valor absoluto ($|\rho|\lesssim 0.13$). En términos de modelado, esto sugiere que gran parte de la señal potencial provendrá de no linealidades e interacciones (ex, edad $\times$ comorbilidades o espera $\times$ día/hora), más que de efectos lineales marginales.
+
+\noindent Las relaciones bivariadas de la \autoref{fig:bivariadas}, trazadas sobre una submuestra estratificada para hacer visible la clase minoritaria, refuerzan la intuición anterior. En \emph{wait\_days vs.\ age} la nube es triangular: predominan esperas cortas en todo el rango etario, los \emph{no-show} (rojo) se mezclan con los asistidos (azul) sin fronteras lineales claras, con un leve aumento de densidad de \emph{no-shows} cuando la espera se alarga. En \emph{sched\_hour vs.\ age} se aprecian bandas horizontales por horas, con mezcla prácticamente uniforme por clase indicio de efecto marginal débil de la hora y, en su caso, no monótono. En \emph{sched\_hour vs.\ wait\_days} predominan nuevamente esperas cortas para casi todas las horas, cualquier señal útil parece emerger más de combinaciones (hora $\times$ día, hora $\times$ tipo de paciente) que de cada variable por separado. Estos patrones justifican evaluar, junto a una base lineal (logística), modelos capaces de capturar interacciones y no linealidades (ex, Random Forest).
+
+\noindent Desagregando el resultado por calendario, la \autoref{fig:eda-day} muestra una heterogeneidad moderada por día de la semana: la tasa de \emph{no-show} se mantiene cercana al 20\% de lunes a jueves (20.6\%, 20.1\%, 19.7\%, 19.4\%), sube el viernes (21.2\%) y alcanza un máximo el sábado (23.1\%). La amplitud total es $\sim$3.7 p.p.\ (sábado vs.\ jueves). Este patrón es compatible con mezcla de casos y prácticas de programación (mayor proporción de citas opcionales/reprogramadas hacia fin de semana), por lo que no se interpreta causalmente, sí justifica incluir \texttt{appt\_weekday} (one–hot ordenado) y explorar interacciones con \texttt{sched\_hour} y \texttt{wait\_days}.
+
+\noindent Por último, la \autoref{fig:eda-sms} compara tasas brutas según recordatorio por SMS: $\hat p_{\text{no SMS}}\approx 16.7\%$ frente a $\hat p_{\text{SMS}}\approx 27.6\%$, diferencia de $\sim$10.9 p.p.\ (relativa $\sim$+65\%). Con tamaños muestrales muy distintos (aprox.\ 75k sin SMS y 35k con SMS), los errores estándar son pequeños ($\mathrm{se}(\hat p)=\sqrt{\hat p(1-\hat p)/n}\approx 0.13$–$0.24$ p.p.). Dado que \texttt{sms\_received} está fuertemente correlacionada con \texttt{wait\_days} ($\rho\approx 0.57$), este contraste refleja \emph{targeting} operativo y diferencias de mezcla temporal, no un efecto causal del mensaje. En la parte predictiva, se trata \texttt{sms\_received} como una característica informativa del proceso, cualquier inferencia causal requeriría un diseño o identificación específicos.
+
+\medskip
+\noindent Entonces, se tiene las siguientes implicaciones para el modelado: el conjunto de evidencias sugiere: (i) tratar \texttt{wait\_days} y \texttt{sched\_hour} con codificaciones/transformaciones acordes a su forma discreta y asimétrica, (ii) controlar la cardinalidad de \texttt{neighbourhood} para evitar una expansión excesiva de dummies, (iii) considerar codificación ordinal/binarización de \texttt{handcap}, y (iv) incorporar pesos de clase en el entrenamiento dada la prevalencia de \emph{no-show} ($\approx 20.2\%$). Sobre esta base se implementa una línea baseline (logística con \emph{one–hot}) y un modelo no lineal (Random Forest) para capturar interacciones de calendario y perfil clínico.
+
+\section{Metodología}
+
+\subsection{Split estratificado y protocolo fuera de muestra}
+\noindent Se parte de $X$ (covariables) y $y=\texttt{no\_show}\in\{0,1\}$. Se realiza un split estratificado entrenamiento/prueba de 80/20 con \texttt{random\_state=42}. El conjunto final tiene $N=110{,}526$ observaciones: $N_{\text{train}}=88{,}420$ y $N_{\text{test}}=22{,}106$, manteniendo prevalencia prácticamente idéntica en ambos subconjuntos ($\Pr(y{=}1)\approx 0.2019$).
+
+\subsection{Preprocesamiento y espacio de características}
+\noindent Se usa un \texttt{ColumnTransformer} con: (i) \emph{one-hot encoding} para \texttt{gender}, \texttt{neighbourhood} y \texttt{appt\_weekday}, con \texttt{handle\_unknown="ignore"}, y (ii) paso directo para el resto de variables numéricas/binarias. La salida del preprocesamiento se construye en formato denso. Tras la expansión categórica, el número total de características es $p=98$ (89 dummies categóricas + 9 variables pasadas directamente).
+
+\subsection{Modelos}
+
+\noindent Sea $\{(x_i,y_i)\}_{i=1}^n$ una muestra i.i.d.\ donde $x_i\in\mathcal{X}$ es el vector de covariables observadas al agendamiento y $y_i\in\{0,1\}$ indica ausentismo (\(y_i=1\) si el paciente no asiste). Denote por $\phi:\mathcal{X}\to\mathbb{R}^p$ el mapeo de preprocesamiento (expansión \emph{one-hot} de categóricas y paso directo de numéricas/binarias), y por $z_i=\phi(x_i)$ el vector de características resultante. Ambos modelos producen un \emph{score} $\hat s(x)\in[0,1]$ interpretable como probabilidad estimada de \emph{no-show}, y se estiman dentro de un Pipeline que encapsula $\phi(\cdot)$ y el estimador, de modo que $\phi$ se ajusta únicamente con datos de entrenamiento en cada partición, evitando data leakage.
+
+\paragraph{Regresión logística}
+La regresión logística especifica un modelo paramétrico para la probabilidad condicional:
+\begin{equation}
+\Pr(y_i=1\mid x_i)=\Pr(y_i=1\mid z_i)=\sigma(\beta_0+\beta^\top z_i),
+\qquad 
+\sigma(t)=\frac{1}{1+e^{-t}}.
+\end{equation}
+Los parámetros $(\beta_0,\beta)$ se estiman por máxima verosimilitud penalizada (\emph{ridge}), resolviendo
+\begin{equation}\label{eq:logit_obj}
+\min_{\beta_0,\beta}\,
+\sum_{i=1}^n w_{y_i}\,\log\!\Big(1+\exp\big(-(2y_i-1)(\beta_0+\beta^\top z_i)\big)\Big)
+\,+\,\frac{\lambda}{2}\|\beta\|_2^2,
+\end{equation}
+donde $w_{y}$ son pesos por clase y $\lambda>0$ controla la regularización. En esta implementación, \texttt{class\_weight="balanced"} fija $w_1$ y $w_0$ inversamente proporcionales a las frecuencias de clase en entrenamiento (equivalente a dar mayor costo a errores sobre la clase minoritaria). El parámetro $\lambda$ corresponde a la penalización $\ell_2$ por defecto en \texttt{scikit-learn} y \texttt{max\_iter=1000} garantiza convergencia numérica del solver.
+
+\paragraph{Random Forest.}
+El Random Forest es un ensamble no paramétrico de árboles de clasificación. Cada árbol $b\in\{1,\dots,B\}$ se entrena sobre una muestra \emph{bootstrap} de los datos y, en cada nodo, la partición se elige considerando un subconjunto aleatorio de características. Cada árbol induce una regla de probabilidad $\hat s_b(x)=\hat s_b(z)\in[0,1]$ (proporción de clase 1 en la hoja terminal). El bosque promedia estas probabilidades:
+\begin{equation}
+\hat s_{\text{RF}}(x)=\frac{1}{B}\sum_{b=1}^B \hat s_b(x).
+\end{equation}
+En la práctica fije $B=300$ (\texttt{n\_estimators=300}) y se controla complejidad imponiendo un tamaño mínimo de hoja \texttt{min\_samples\_leaf=20}, lo cual reduce varianza al evitar particiones demasiado finas. Para manejar el desbalance, \texttt{class\_weight="balanced\_subsample"} aplica pesos por clase dentro de cada muestra \emph{bootstrap}. La aleatoriedad se controla con \texttt{random\_state=42} y el entrenamiento se paraleliza con \texttt{n\_jobs=-1}.
+
+
+\subsection{Validación cruzada en entrenamiento y métricas}
+\noindent La selección de desempeño se realiza en el conjunto de entrenamiento usando validación cruzada estratificada de 5 pliegues (\texttt{StratifiedKFold}, \texttt{shuffle=True}, \texttt{random\_state=42}). Se reporta ROC-AUC y PR-AUC (Average Precision, $\AP$). 
+
+\noindent En el conjunto de prueba reservado se reporta además $\PrecisionAt{10\%}$ y $\PrecisionAt{20\%}$, definidas como la proporción de verdaderos \emph{no-shows} dentro del 10\% (20\%) de pacientes con mayor riesgo predicho.
+
+\section{Resultados}
+
+\subsection{Desempeño en validación cruzada (entrenamiento)}
+\noindent La Tabla~\ref{tab:cv} resume el desempeño promedio (y desviación estándar) en validación cruzada estratificada de 5 pliegues sobre el conjunto de entrenamiento. El Random Forest domina a la logística tanto en ROC-AUC como en PR-AUC, con variabilidad pequeña entre pliegues, lo que sugiere estabilidad fuera de muestra dentro del mismo régimen de datos.
+
+\begin{table}[t]
+  \centering
+  \caption{Desempeño en validación cruzada (5-fold) sobre \texttt{train}.}
+  \label{tab:cv}
+  \begin{tabular}{l S S S S}
+    \toprule
+    \textbf{Modelo} & {\textbf{AUC (mean)}} & {\textbf{AUC (sd)}} & {\textbf{AP (mean)}} & {\textbf{AP (sd)}} \\
+    \midrule
+    Regresión logística & 0.670 & 0.005 & 0.306 & 0.004 \\
+    Random Forest      & 0.736 & 0.005 & 0.370 & 0.004 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Desempeño fuera de muestra (prueba reservada)}
+\noindent La Tabla~\ref{tab:test} reporta el desempeño en el conjunto de prueba reservado ($N_{\text{test}}=22{,}106$). El patrón se mantiene: el Random Forest obtiene $\AUC=0.738$ y $\AP=0.372$, frente a $\AUC=0.674$ y $\AP=0.310$ de la logística.
+
+\begin{table}[t]
+  \centering
+  \caption{Desempeño en prueba reservada (\texttt{test}).}
+  \label{tab:test}
+  \begin{tabular}{l S S S S}
+    \toprule
+    \textbf{Modelo} & {\textbf{ROC-AUC}} & {\textbf{PR-AUC (\(\AP\))}} & {\(\PrecisionAt{10\%}\)} & {\(\PrecisionAt{20\%}\)} \\
+    \midrule
+    Regresión logística & 0.674 & 0.310 & 0.356 & 0.345 \\
+    Random Forest      & 0.738 & 0.372 & 0.418 & 0.385 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=.6\linewidth]{fig_pr_test.png}
+  \caption{Curvas Precision--Recall (PR) en prueba reservada. La línea horizontal punteada corresponde a la precisión base, igual a la prevalencia de \emph{no-show} en el conjunto de prueba (\(\Pr(y=1)\approx 0.202\)).}
+  \label{fig:pr-test}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=.6\linewidth]{fig_gains_test.png}
+  \caption{Curvas de ganancias acumuladas en prueba reservada. En el eje \(x\) se muestra la fracción priorizada (top-\(k\) por score) y en el eje \(y\) la fracción de \emph{no-shows} capturados (recall acumulado). La diagonal representa selección aleatoria (\(G(k)=k\)).}
+  \label{fig:gains-test}
+\end{figure}
+
+\subsection{Lectura operativa: \(\PrecisionAt{k}\), PR y ganancias acumuladas}
+
+\paragraph{Curva Precision--Recall (PR).}
+Para un umbral \(t\), defina \(\hat y(t)=\mathbf{1}\{\hat s(x)\ge t\}\). La precisión y el recall son
+\[
+\mathrm{Precision}(t)=\frac{\mathrm{TP}(t)}{\mathrm{TP}(t)+\mathrm{FP}(t)}, 
+\qquad
+\mathrm{Recall}(t)=\frac{\mathrm{TP}(t)}{\mathrm{TP}(t)+\mathrm{FN}(t)}.
+\]
+La \autoref{fig:pr-test} muestra que el Random Forest mantiene mayor precisión para un mismo nivel de recall, coherente con \(\AP_{\text{test}}=0.372\) frente a \(0.310\) en logística (Tabla~\ref{tab:test}). En un problema desbalanceado, la referencia natural es la precisión base, igual a la prevalencia \(\Pr(y=1)\approx 0.202\).
+
+\paragraph{Priorización y \(\PrecisionAt{k}\).}
+Si la institución solo puede intervenir a una fracción \(k\) de pacientes, se ordena por score \(\hat s_i\) y defina \(\mathcal{T}_k\) como el conjunto top-\(k\) de tamaño \(|\mathcal{T}_k|=\lceil kN_{\text{test}}\rceil\). Entonces
+\[
+\PrecisionAt{k}=\frac{1}{|\mathcal{T}_k|}\sum_{i\in\mathcal{T}_k}\mathbf{1}\{y_i=1\},
+\qquad
+\text{Lift@}k=\frac{\PrecisionAt{k}}{\Pr(y=1)}.
+\]
+En prueba, con \(\Pr(y=1)\approx 0.202\), la logística obtiene \(\PrecisionAt{10\%}=0.356\) (\(\text{Lift@}10\%\approx 1.76\times\)) y el Random Forest \(\PrecisionAt{10\%}=0.418\) (\(\text{Lift@}10\%\approx 2.07\times\)). Para \(k=20\%\), los valores son \(0.345\) vs.\ \(0.385\) (lift \(\approx 1.71\times\) vs.\ \(1.91\times\)).
+
+\paragraph{Curva de ganancias acumuladas (gains).}
+La \autoref{fig:gains-test} reporta
+\[
+G(k)=\frac{\sum_{i\in\mathcal{T}_k}\mathbf{1}\{y_i=1\}}{\sum_{i=1}^{N_{\text{test}}}\mathbf{1}\{y_i=1\}},
+\]
+que mide la fracción de todos los \emph{no-shows} capturados al priorizar una fracción \(k\) de pacientes. Bajo selección aleatoria, \(G(k)=k\). En nuestros resultados, priorizar el top-10\% captura \(G(0.10)=0.177\) con logística y \(G(0.10)=0.207\) con Random Forest, para top-20\%, \(G(0.20)=0.341\) y \(0.382\), respectivamente. Esto muestra que el score del Random Forest concentra más riesgo y, por tanto, es superior como herramienta de focalización cuando la capacidad de intervención es limitada, sin interpretar causalmente covariables operativas (ex,\ SMS).
+
+
+
+\subsection{Endogeneidad del SMS y riesgo contrafactual para política}
+
+\noindent En la base histórica, el recordatorio por SMS no se asigna al azar. Denote:
+\(D\in\{0,1\}\) indicador de SMS (\(D=1\) si recibió SMS),
+\(Y\in\{0,1\}\) indicador de \emph{no-show},
+y \(X\) covariables pre-tratamiento observables (edad, espera, día/hora, barrio, etc.).
+Bajo asignación endógena, entrenar un único modelo con \(D\) como covariable puede recuperar el riesgo bajo la política histórica (mezcla):
+\[
+\Pr(Y=1\mid X)=e(X)\,p_1(X) + (1-e(X))\,p_0(X),
+\]
+donde \(e(X)=\Pr(D=1\mid X)\), \(p_1(X)=\Pr(Y=1\mid X,D=1)\) y \(p_0(X)=\Pr(Y=1\mid X,D=0)\).
+Sin embargo, para decidir \emph{ex-ante} si enviar SMS se necesita precisamente \(p_0(X)\), el riesgo
+sin tratamiento. En particular, entrenar sobre la mezcla y luego “poner \(D=0\)” al aplicar una política
+no produce un score interpretable como riesgo contrafactual sin intervención. 
+
+\paragraph{Enfoque propuesto (dos modelos).}
+Separa explícitamente:
+(i) un modelo descriptivo que predice bajo la política histórica (puede incluir \(D\) como covariable),
+útil para EDA y para documentar targeting operacional, y
+(ii) un modelo de política ex-ante que estima
+\[
+p_0(X)=\Pr(Y=1\mid X,D=0),
+\]
+entrenado solo en el subconjunto \(D=0\) y usando únicamente covariables pre-tratamiento.
+Para corregir el sesgo de selección inducido por quién cae en \(D=0\), se estima \(e(X)=\Pr(D=1\mid X)\)
+y se repondera las observaciones con \(D=0\) mediante
+\[
+w(X)=\frac{1}{1-e(X)},
+\]
+bajo el supuesto de ignorabilidad condicional en \(X\) y soporte común. El score de política es entonces
+\(\widehat p_0(X)\).
+
+\paragraph{Regla económica (umbral).}
+Si el objetivo es decidir un contacto (SMS o SMS+llamada) con costo \(C\) y beneficio neto por cita
+recuperada \(b\), y si el tratamiento reduce el riesgo en proporción \(\theta\), una regla operativa natural es:
+\[
+\widehat p_0(X)\,\theta\,b \ge C
+\quad\Longleftrightarrow\quad
+\widehat p_0(X)\ge p^\ast=\frac{C}{b\theta}.
+\]
+En este trabajo no identificamos causalmente \(\theta\) con estos datos, para una etapa aplicada,
+\(\theta\) debe venir de evidencia experimental o de una estrategia causal adicional.
+
+\paragraph{Alternativa (variables instrumentales).}
+Si existiera variación exógena en el envío de SMS (ex,\ shocks del proveedor, cambios discretos de política,
+reglas por cupos), podría utilizarse un instrumento \(Z\) para identificar un efecto local del tratamiento y así
+estimar \(\theta\) relevante para política.
+
+\subsection{Score de política bajo asignación endógena de SMS}
+
+Dado que el envío de SMS (\(D\)) responde a decisiones operativas históricas, el score relevante para una política ex-ante es
+\(\widehat p_0(X)\approx \Pr(Y=1\mid X,D=0)\), es decir, el riesgo contrafactual sin intervención.
+Se estima \(\widehat p_0\) entrenando modelos únicamente en el subconjunto \(D=0\) y reponderando por
+\(w(X)=1/(1-\hat e(X))\), donde \(\hat e(X)=\Pr(D=1\mid X)\) es el \emph{propensity score}.
+Para estabilizar la estimación ante solapamiento imperfecto (pesos extremos), se "capan" los pesos al percentil 99.
+La Tabla~\ref{tab:policy} resume el desempeño de estos modelos de política en la muestra de prueba restringida a \(D=0\).
+
+\begin{table}[t]
+  \centering
+  \caption{Desempeño del \emph{score de política} \(\widehat p_0(X)\) en prueba restringida a \(D=0\) (con pesos IPW capados al p99).}
+  \label{tab:policy}
+  \begin{tabular}{l S S S S}
+    \toprule
+    \textbf{Modelo} & {\textbf{ROC-AUC}} & {\textbf{PR-AUC (\(\AP\))}} & {\(\PrecisionAt{10\%}\)} & {\(\PrecisionAt{20\%}\)} \\
+    \midrule
+    Policy-LogReg (\(p_0\)) & 0.641 & 0.271 & 0.357 & 0.296 \\
+    Policy-RF (\(p_0\))     & 0.783 & 0.372 & 0.425 & 0.376 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Curva PR en \(D=0\).}
+La \autoref{fig:pr-policy-p0} muestra las curvas Precision--Recall en prueba restringida a \(D=0\).
+La línea base de precisión es la prevalencia en \(D=0\), \(\Pr(Y=1\mid D=0)\approx 0.164\).
+El Random Forest domina a la logística y obtiene mayor área bajo la curva:
+\(\AP=0.372\) frente a \(\AP=0.271\).
+
+\paragraph{Ganancias acumuladas y focalización.}
+Sea \(\mathcal{T}_k\) el conjunto top-\(k\) por \(\widehat p_0(X)\) (de tamaño \(|\mathcal{T}_k|=\lceil kN_{D=0}\rceil\)).
+Defina la ganancia acumulada:
+\[
+G(k)=\frac{\sum_{i\in\mathcal{T}_k}\mathbf{1}\{Y_i=1\}}{\sum_{i:D_i=0}\mathbf{1}\{Y_i=1\}}.
+\]
+Bajo selección aleatoria, \(G(k)=k\). En nuestros resultados, para \(k=10\%\) la logística captura
+\(G(0.10)=0.217\) y el Random Forest \(G(0.10)=0.259\), para \(k=20\%\), las capturas son
+\(G(0.20)=0.361\) y \(G(0.20)=0.457\), respectivamente. 
+
+Con \(N_{D=0}=14{,}918\) y \(\Pr(Y=1\mid D=0)\approx 0.164\), esto implica que priorizar el top-10\%
+(\(\approx 1{,}492\) pacientes) captura en torno a \(0.217\times 2{,}452\approx 532\) \emph{no-shows} con logística y
+\(0.259\times 2{,}452\approx 635\) con Random Forest, frente a \(\approx 245\) bajo priorización aleatoria.
+En suma, el score \(\widehat p_0(X)\) permite focalizar riesgo de manera consistente con una política ex-ante,
+y el Random Forest es sustancialmente superior para este propósito.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_pr_policy_p0_D0test.png}
+  \caption{Curvas Precision--Recall en prueba restringida a \(D=0\) (no se envió SMS). Scores de política \(\widehat p_0(X)=\Pr(Y=1\mid X,D=0)\). La línea horizontal punteada corresponde a la prevalencia en \(D=0\): \(\Pr(Y=1\mid D=0)\approx 0.164\).}
+  \label{fig:pr-policy-p0}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_gains_policy_p0_D0test.png}
+  \caption{Curvas de ganancias acumuladas en prueba restringida a \(D=0\). En el eje \(x\) se muestra la fracción priorizada (top-\(k\)) por \(\widehat p_0(X)\) y en el eje \(y\) la fracción de \emph{no-shows} capturados (recall acumulado). La diagonal representa selección aleatoria (\(G(k)=k\)).}
+  \label{fig:gains-policy-p0}
+\end{figure}
+
+\section{Discusión, limitaciones y trabajo futuro}
+
+\subsection{Qué predicen los modelos (y qué no)}
+
+\noindent En este trabajo se estima \emph{scores} predictivos con fines de priorización operativa. 
+El modelo estándar entrenado sobre toda la muestra (mezcla de $D=0$ y $D=1$) aproxima la probabilidad
+de \emph{no-show} bajo el histórico de asignación de SMS, es decir, una combinación de
+$p_0(X)=\Pr(Y=1\mid X,D=0)$ y $p_1(X)=\Pr(Y=1\mid X,D=1)$ ponderada por el \emph{propensity score}
+$e(X)=\Pr(D=1\mid X)$. Su score es útil para anticipar ausentismo dado el proceso actual, pero
+no debe leerse como riesgo contrafactual bajo una política alternativa.
+
+\noindent El \emph{score de política} $\widehat p_0(X)\approx \Pr(Y=1\mid X,D=0)$, en cambio, está diseñado
+para decisiones ex-ante: intenta aproximar el riesgo sin intervención (sin SMS) usando solo
+covariables pre-tratamiento y reponderación IPW en el subconjunto $D=0$. En ningún caso identificamos
+el efecto causal del SMS, la asociación bruta entre \texttt{sms\_received} y \emph{no-show} refleja
+targeting operativo y mezcla temporal (correlación con \texttt{wait\_days}), no necesariamente
+impacto del mensaje.
+
+\subsection{Lectura económica y operativa}
+
+Para un problema desbalanceado (\(\Pr(Y=1)\approx 0.20\)), los resultados muestran que un modelo
+no lineal (Random Forest) concentra más riesgo que una base lineal logística, tanto en
+métricas globales (ROC-AUC, PR-AUC) como en métricas de priorización (\(\mathrm{P@}k\), ganancias
+acumuladas \(G(k)\)). Si la institución solo puede intervenir sobre una fracción $k$ de pacientes,
+el ranking por score permite capturar una fracción de \emph{no-shows} claramente superior a la selección
+aleatoria. Operativamente, esto se traduce en focalizar recordatorios, reprogramaciones proactivas
+o confirmaciones telefónicas en el top-\(k\) de riesgo, respetando restricciones de capacidad.
+
+En el módulo de política, el score $\widehat p_0(X)$ mantiene esta capacidad de concentración
+dentro del subconjunto $D=0$, lo que sugiere que, aun corrigiendo por asignación endógena,
+es posible construir reglas de priorización ex-ante consistentes con riesgo sin intervención.
+
+\subsection{Limitaciones principales}
+
+Este es un ejercicio predictivo, con varias limitaciones relevantes:
+
+\begin{itemize}
+  \item \textbf{Asignación endógena de SMS:} \texttt{sms\_received} refleja decisiones operativas
+  históricas, no asignación aleatoria. La construcción de $\widehat p_0(X)$ descansa en supuestos
+  de ignorabilidad condicional y soporte común, si existen determinantes no observados (ex,\
+  severidad clínica, historial de adherencia, restricciones de transporte) que afectan a la vez
+  $D$ y $Y$, el score de política puede estar sesgado.
+
+  \item \textbf{Soporte común imperfecto (overlap) y pesos extremos:} las distribuciones de
+  $e(X)$ para $D=0$ y $D=1$ difieren de forma apreciable, generando pesos IPW muy grandes en
+  algunas regiones de $X$. Sin capping, el tamaño efectivo de muestra (ESS) para $D=0$ es
+  reducido, lo que aumenta varianza. Capar pesos (p95, p99 o valor fijo) mejora el ESS a costa
+  de introducir algo de sesgo, por eso reporta diagnósticos de overlap, distribución de pesos
+  y sensibilidad del desempeño a la regla de capping.
+
+  \item \textbf{Calibración de probabilidades:} aunque la calidad de ranking es buena
+  (particularmente en Random Forest), las curvas de calibración muestran que los modelos
+  tienden a sobreestimar el riesgo en los deciles altos. Para reglas basadas en umbrales
+  monetarios \(p^\ast\), la calibración se vuelve central, aquí solo se da un primer diagnóstico
+  con curvas de confiabilidad y Brier score.
+
+  \item \textbf{Validez externa y dataset shift:} los datos provienen de una sola ciudad
+  y de un periodo concreto, y el split 80/20 es aleatorio. Cambios en la agenda, en la política
+  de recordatorios o en la composición de pacientes pueden alterar la relación entre covariables
+  y ausentismo. En despliegue real se requiere monitoreo de drift y, posiblemente, reentrenamiento
+  periódico.
+
+\end{itemize}
+
+\subsection{Trabajo futuro}
+
+A partir de estos resultados, se ven varias extensiones:
+
+\begin{itemize}
+  \item \textbf{Calibración post-estimación:} aplicar métodos isotónicos o de Platt en un conjunto
+  de validación (tanto para el modelo estándar como para el score de política) y evaluar métricas
+  como Brier y Expected Calibration Error (ECE), además de \(\mathrm{P@}k\) (fue literatura que encontré pero no entendí bien).
+
+  \item \textbf{Evaluación temporal y robustez a drift:} reemplazar el split aleatorio por un split
+  temporal (entrenar en meses iniciales y evaluar en meses posteriores) y monitorear la estabilidad
+  de AUC, \(\AP\) y \(\mathrm{P@}k\) a lo largo del tiempo.
+
+  \item \textbf{De scores a decisiones:} combinar el score $\widehat p_0(X)$ con información sobre
+  costos \(C\), beneficios \(b\) y una estimación causal del efecto \(\theta\) de SMS/llamada (idealmente
+  proveniente de un RCT, una discontinuidad de política o un instrumento válido) para derivar reglas
+  de intervención basadas en net benefit, por ejemplo vía Decision Curve Analysis.
+
+  \item \textbf{Modelos adicionales y comparación:} explorar variantes gradiente (GBDT, XGBoost/LightGBM)
+  y otros modelos tabulares competitivos, manteniendo el mismo protocolo de evaluación fuera de muestra
+  y los mismos diagnósticos de overlap, pesos y calibración.
+\end{itemize}
+
+\subsection{Reproducibilidad}
+
+\noindent Todos los modelos se implementan en \texttt{scikit-learn} mediante Pipeline, con semilla fija
+(random\_state=42) y preprocesamiento (\emph{one-hot} con \texttt{handle\_unknown="ignore"})
+ajustado exclusivamente sobre entrenamiento en cada pliegue de validación cruzada, evitando
+data leakage. El código proporciona los scripts necesarios para regenerar tablas, figuras y
+experimentos, de modo que los resultados puedan auditarse y extenderse sobre una base reproducible.
+
+
+\section{Conclusiones}
+
+\noindent Usando un conjunto público de \(110{,}526\) citas ambulatorias en Brasil (prevalencia de \emph{no-show} \(\approx 20.2\%\)),
+construimos un pipeline reproducible con regresión logística y Random Forest para predecir ausentismo.
+En evaluación fuera de muestra, el Random Forest domina consistentemente en métricas globales
+(\(\AUC\) y \(\AP\)) y en métricas operativas de focalización (\(\PrecisionAt{k}\) y ganancias acumuladas), lo que
+indica que captura no linealidades e interacciones relevantes (calendario, espera, perfil del paciente) que un modelo
+lineal no recoge completamente.
+
+Adicionalmente, se abroda el problema operativo de endogeneidad en el envío histórico de SMS separando un score
+descriptivo (política histórica) de un score de política ex-ante \(\widehat p_0(X)=\Pr(Y=1\mid X,D=0)\), entrenado en
+\(D=0\) y reponderado con IPW. Los diagnósticos de overlap, distribución de pesos y ESS muestran que la reponderación
+puede ser inestable sin estabilización, al capar pesos (p95/p99) obtenemos desempeños sustantivamente mejores y robustos.
+En conjunto, los resultados sugieren que un enfoque predictivo simple puede ser un insumo útil para priorización bajo
+restricciones de capacidad, mientras que la traducción del score a una regla óptima de intervención requiere un componente
+causal adicional para identificar la efectividad del recordatorio.
+
+
+
+\clearpage
+\begin{appendices}
+
+\section{Exploración descriptiva adicional (EDA)}
+\label{app:eda}
+
+\noindent Esta sección recopila las figuras completas de EDA que sustentan la discusión de la
+Sección~\ref{app:eda}. El objetivo es documentar la estructura básica de las variables
+(forma de las distribuciones, colinealidad y relaciones bivariadas) para facilitar la
+auditoría del pipeline.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.5\linewidth]{fig_distribuciones.png}
+  \caption{Distribuciones marginales de las variables sobre la muestra depurada.}
+  \label{fig:distribuciones}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.5\linewidth]{fig_corr_spearman.png}
+  \caption{Correlaciones de Spearman en variables numéricas y dummies. Se observa baja colinealidad
+  global, con asociaciones destacadas \texttt{age}--\texttt{hipertension}, \texttt{age}--\texttt{diabetes}
+  y \texttt{wait\_days}--\texttt{sms\_received}.}
+  \label{fig:corr}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=1\linewidth]{fig_bivariadas.png}
+  \caption{Relaciones bivariadas sobre submuestra estratificada (azul: asistió, rojo: \emph{no-show}). Las nubes confirman la ausencia de fronteras lineales claras, especialmente en \texttt{wait\_days} y \texttt{sched\_hour}, y motivan el uso de modelos no lineales.}
+  \label{fig:bivariadas}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.5\linewidth]{fig_no_show_por_dia.png}
+  \caption{Tasa de no-show por día de la semana (lunes--sábado). El ausentismo varía entre $\sim$19.4\% y 23.1\%, con máximo en sábado.}
+  \label{fig:eda-day}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.5\linewidth]{fig_no_show_por_sms.png}
+  \caption{Tasa de no-show según recordatorio por SMS (bruta, observacional). La mayor tasa en el grupo con SMS refleja \emph{targeting} y mezcla temporal, no necesariamente un efecto causal del mensaje.}
+  \label{fig:eda-sms}
+\end{figure}
+
+
+
+\clearpage
+\section{Diagnósticos de solapamiento e IPW para el score de política}
+\label{app:ipw}
+
+\noindent\textbf{Nota sobre fuentes y uso de IA.} 
+Los conceptos de \emph{propensity score}, tamaño efectivo de muestra (ESS) y
+winsorización de pesos IPW que se utilizan en este apéndice provienen de la
+literatura estándar de inferencia causal y no se trabajaron en detalle en el
+curso. Decidí incorporarlos como un ejercicio exploratorio para entender mejor
+las limitaciones de la reponderación y documentar diagnósticos básicos de
+solapamiento y estabilidad de los pesos.
+
+\noindent Para estudiar estos temas y redactar la sección utilicé un asistente de inteligencia artificial (Gemini gratis) como apoyo en el código, en la explicación conceptual y en la propuesta de los gráficos/tablas de robustez. El procesamiento de los datos, la elección de los escenarios de sensibilidad (sin cap, p95, p99 y cap fijo) sí fueron realizados por mí. Esta sección debe entenderse como material complementario que estoy aprendiendo a usar, más que como parte central evaluada del curso:
+
+\noindent Definimos el \emph{propensity score} $\hat e(X)=\Pr(D=1\mid X)$ y los pesos para $D=0$ como
+\[
+w(X)=\frac{1}{1-\hat e(X)}.
+\]
+El tamaño efectivo de muestra (ESS) de los no tratados ponderados se calcula como
+\[
+\mathrm{ESS}=\frac{\left(\sum_{i:D_i=0} w_i\right)^2}{\sum_{i:D_i=0} w_i^2}.
+\]
+
+\noindent En nuestra base, el subsample de entrenamiento con $D=0$ tiene $N_{D=0}^{\text{train}}=60{,}126$ observaciones.
+Sin winsorización, los pesos presentan colas muy pesadas: el ESS cae a $\mathrm{ESS}\approx 920$ (alrededor
+del 1.5\% de la muestra efectiva), lo que implica alta varianza. Al capar en el percentil 99,
+$w_i^{\mathrm{cap}}=\min\{w_i, q_{0.99}(w)\}$, el ESS aumenta a
+$\mathrm{ESS}^{\text{cap}}\approx 10{,}485$ (17\% de la muestra), con pérdida de información acotada
+y mejoras sustanciales en estabilidad.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_propensity_overlap.png}
+  \caption{Distribución del propensity score $\hat e(X)$ en entrenamiento por grupo $D$ (diagnóstico de soporte común/overlap).
+  El grupo $D=0$ se concentra en valores intermedios ($\sim 0.2$--0.4) mientras que $D=1$ acumula probabilidad en rangos altos
+  ($\hat e(X)\gtrsim 0.5$), con zona de solapamiento razonable en torno a 0.3--0.6 pero masas no triviales cerca de los extremos.}
+  \label{fig:overlap}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_ipw_weights.png}
+  \caption{Distribución de pesos IPW $w(X)$ para $D=0$ (sin cap vs.\ cap p99). Sin cap aparecen pesos extremos
+  (hasta valores superiores a 50), responsables del ESS bajo. El cap p99 recorta la cola derecha y concentra la
+  masa en el rango $[1,10]$, aumentando el ESS y estabilizando la estimación.}
+  \label{fig:weights}
+\end{figure}
+
+
+
+\section{Sensibilidad al cap de pesos IPW}
+\label{app:ipw-sens}
+
+\noindent Para cuantificar el \emph{trade-off} sesgo--varianza, repetimos el entrenamiento del score de política
+variando la regla de winsorización de pesos (sin cap, p95, p99 y cap fijo en 20). La Tabla~\ref{tab:ipw-sens}
+reporta el desempeño en prueba restringida a $D=0$.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Sensibilidad del score de política a la winsorización de pesos IPW (prueba restringida a $D=0$).}
+  \label{tab:ipw-sens}
+  \begin{tabular}{l l S[table-format=1.3] S[table-format=1.3] S[table-format=1.3] S[table-format=1.3]}
+    \toprule
+    \textbf{Modelo} & \textbf{Cap} & {\textbf{ROC-AUC}} & {\textbf{PR-AUC}} & {\(\PrecisionAt{10\%}\)} & {\(\PrecisionAt{20\%}\)} \\
+    \midrule
+    Policy-LogReg & none & 0.554 & 0.194 & 0.227 & 0.207 \\
+    Policy-LogReg & p95  & 0.688 & 0.299 & 0.384 & 0.341 \\
+    Policy-LogReg & p99  & 0.641 & 0.271 & 0.357 & 0.296 \\
+    Policy-LogReg & 20   & 0.664 & 0.288 & 0.383 & 0.322 \\
+    \midrule
+    Policy-RF     & none & 0.778 & 0.361 & 0.418 & 0.369 \\
+    Policy-RF     & p95  & 0.785 & 0.377 & 0.425 & 0.378 \\
+    Policy-RF     & p99  & 0.783 & 0.372 & 0.425 & 0.376 \\
+    Policy-RF     & 20   & 0.784 & 0.377 & 0.424 & 0.383 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent Dado que la prevalencia en $D=0$ es $\Pr(Y=1\mid D=0)\approx 0.164$, las precisiones del
+Random Forest en el top-10\% (0.418--0.425) implican \emph{lifts} cercanos a 2.6 veces la
+línea base, prácticamente invariantes al cap. En cambio, para la logística el desempeño sin cap
+es pobre (AUC 0.554, AP 0.194) y mejora notablemente con cualquier forma de winsorización, con
+valores algo superiores para p95 y cap 20. En el cuerpo del artículo tomamos p99 como especificación
+de referencia por su buen compromiso entre ESS y desempeño, y dejamos el resto de reglas como
+robustez adicional.
+
+
+
+\section{Calibración (curva de confiabilidad y Brier score)}
+\label{app:calib}
+
+\noindent La calibración evalúa si las probabilidades predichas $\hat s(x)$ corresponden a frecuencias empíricas.
+En las Figuras~\ref{fig:calib-test} y~\ref{fig:calib-policy} reportamos curvas de confiabilidad por \emph{bins}
+para los modelos principales (logística y RF en el conjunto de prueba completo) y para los modelos de política
+(Policy-LogReg y Policy-RF en prueba restringida a $D=0$).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_calibration_test.png}
+  \caption{Curvas de confiabilidad en prueba (modelos principales logística y RF). En ambos casos los puntos se sitúan por debajo de la diagonal, indicando cierta sobreestimación del riesgo, algo menor en el RF.}
+  \label{fig:calib-test}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_calibration_policy_D0.png}
+  \caption{Curvas de confiabilidad en prueba restringida a $D=0$ (Policy-LogReg y Policy-RF). El modelo de política basado en RF está mejor calibrado que el logístico, aunque ambos tienden a sobreestimar el riesgo en los deciles altos.}
+  \label{fig:calib-policy}
+\end{figure}
+
+\noindent Para los modelos de política, el Brier score (error cuadrático medio de probabilidad) es
+$\text{Brier}(\text{Policy-LogReg})\approx 0.258$ y
+$\text{Brier}(\text{Policy-RF})\approx 0.198$, coherente con la mejor combinación de ranking y
+calibración del RF. En conjunto, los diagnósticos sugieren que los scores son útiles como
+herramientas de ranking (\(\mathrm{P@}k\), ganancias), pero que una etapa de calibración post-hoc
+(Platt o isotónica) sería recomendable si se desea interpretar las probabilidades de forma
+absoluta o aplicar reglas basadas en umbrales monetarios \(p^\ast\).
+
+
+
+\section{Interpretabilidad: importancia de variables (permutation importance)}
+\label{app:interpret}
+
+\noindent Como diagnóstico de interpretabilidad global, calculamos \emph{permutation importance} en prueba
+para el modelo de política (Policy-RF), medida como la caída media en $\AP$ al permutar cada covariable.
+La Figura~\ref{fig:permimp} muestra el ranking visual y la Tabla~\ref{tab:permimp} reporta las caídas
+medias y su desviación estándar.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=.75\linewidth]{fig_perm_importance_policy_rf.png}
+  \caption{Permutation importance (principales covariables) para el score de política (Policy-RF) en $D=0$ test, medida como caída en $\AP$ al permutar cada variable.}
+  \label{fig:permimp}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Permutation importance para Policy-RF en prueba restringida a $D=0$.}
+  \label{tab:permimp}
+  \begin{tabular}{l S[table-format=1.3] S[table-format=1.3]}
+    \toprule
+    \textbf{Variable} & {Caída media en \AP} & {Desv.\ estándar} \\
+    \midrule
+    \texttt{wait\_days}   & 0.187 & 0.003 \\
+    \texttt{age}          & 0.030 & 0.004 \\
+    \texttt{neighbourhood}& 0.017 & 0.003 \\
+    \texttt{sched\_hour}  & 0.012 & 0.002 \\
+    \texttt{appt\_weekday}& 0.008 & 0.003 \\
+    \texttt{scholarship}  & 0.003 & 0.001 \\
+    \texttt{hipertension} & 0.002 & 0.002 \\
+    \texttt{alcoholism}   & 0.001 & 0.000 \\
+    \texttt{handcap}      & 0.001 & 0.001 \\
+    \texttt{gender}       & 0.000 & 0.001 \\
+    \texttt{diabetes}     & 0.000 & 0.000 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\noindent La importancia dominante de \texttt{wait\_days} es consistente con la intuición clínica y con la EDA:
+la espera prolongada aumenta el riesgo de ausentismo. Le siguen \texttt{age} y \texttt{neighbourhood},
+lo que sugiere heterogeneidad por ciclo de vida y por contexto geográfico. Día y hora de la cita
+aportan señal adicional pero de menor magnitud, mientras que las variables clínicas y demográficas
+básicas (\texttt{gender}, \texttt{diabetes}, \texttt{handcap}) tienen contribuciones marginales a la
+capacidad predictiva del modelo de política.
+
+
+
+\section{Robustez temporal (si se dispone de fechas)}
+\label{app:time}
+
+\noindent Finalmente, un chequeo más exigente de generalización consiste en introducir una partición temporal
+usando \texttt{AppointmentDay}: entrenar en meses iniciales y evaluar en meses posteriores. Esto reduce
+el riesgo de optimismo asociado a un split aleatorio donde tren y prueba comparten la misma mezcla
+temporal. En un despliegue real, este tipo de evaluación temporal, combinada con monitoreo en línea
+de métricas como AUC, \(\AP\) y \(\PrecisionAt{k}\), es clave para detectar \emph{drift} y decidir
+cuándo reentrenar el modelo.
+
+\end{appendices}
+
+
+\begin{thebibliography}{9}
+
+\bibitem{KaggleNoShows}
+J.~Aroba.
+\newblock \emph{Medical Appointment No Shows (Kaggle dataset)}.
+\newblock Disponible en: \url{https://www.kaggle.com/datasets/joniarroba/noshowappointments}.
+
+\bibitem{VickersElkin2006}
+A.~J.~Vickers y E.~B.~Elkin.
+\newblock \emph{Decision curve analysis: A novel method for evaluating prediction models}.
+\newblock \textit{Medical Decision Making}, 26(6):565--574, 2006.
+
+\bibitem{GurolUrganci2013}
+I.~Gurol-Urganci, T.~de~Jongh, V.~Vodopivec-Jamsek, R.~Atun y J.~Car.
+\newblock \emph{Mobile phone messaging reminders for attendance at healthcare appointments}.
+\newblock \textit{Cochrane Database of Systematic Reviews}, (12):CD007458, 2013.
+\newblock doi: 10.1002/14651858.CD007458.pub3.
+
+\bibitem{HasvoldWootton2011}
+P.~E.~Hasvold y R.~Wootton.
+\newblock \emph{Use of telephone and text-message reminders to improve attendance at hospital appointments: A systematic review}.
+\newblock \textit{Journal of Telemedicine and Telecare}, 17(7):358--364, 2011.
+
+\bibitem{Liu2022}
+D.~Liu et al.
+\newblock \emph{Machine learning approaches to predicting medical appointment \emph{no-shows} in pediatric care}.
+\newblock \textit{npj Digital Medicine}, 5:48, 2022.
+
+\bibitem{Salazar2022}
+L.~H.~A.~Salazar et al.
+\newblock \emph{No-show in medical appointments with machine learning techniques: A systematic literature review}.
+\newblock \textit{Information}, 13(11):507, 2022.
+
+\end{thebibliography}
+
+
+
+\end{document}
+
