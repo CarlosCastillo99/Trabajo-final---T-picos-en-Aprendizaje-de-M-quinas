@@ -20,7 +20,7 @@
 \sisetup{round-mode=places,round-precision=3,detect-weight=true,detect-inline-weight=math}
 
 
-\title{Predicción de ausentismo a citas médicas con aprendizaje de máquinas: \\
+\title{Predicción de \emph{No-shows} a citas médicas con aprendizaje de máquinas: \\
 un estudio con datos reales de Brasil}
 
 \author{Carlos Castillo}
@@ -350,58 +350,55 @@ es posible construir reglas de priorización ex-ante consistentes con riesgo sin
 
 \subsection{Limitaciones principales}
 
-Este es un ejercicio predictivo, con varias limitaciones relevantes:
+\noindent Este es un ejercicio predictivo, con varias limitaciones relevantes:
 
-\begin{itemize}
-  \item \textbf{Asignación endógena de SMS:} \texttt{sms\_received} refleja decisiones operativas
-  históricas, no asignación aleatoria. La construcción de $\widehat p_0(X)$ descansa en supuestos
-  de ignorabilidad condicional y soporte común, si existen determinantes no observados (ex,\
-  severidad clínica, historial de adherencia, restricciones de transporte) que afectan a la vez
-  $D$ y $Y$, el score de política puede estar sesgado.
+\noindent\textbf{Asignación endógena de SMS:} \texttt{sms\_received} refleja decisiones operativas
+históricas, no asignación aleatoria. La construcción de $\widehat p_0(X)$ descansa en supuestos
+de ignorabilidad condicional y soporte común, si existen determinantes no observados (ex,\
+severidad clínica, historial de adherencia, restricciones de transporte) que afectan a la vez
+$D$ y $Y$, el score de política puede estar sesgado.
 
-  \item \textbf{Soporte común imperfecto (overlap) y pesos extremos:} las distribuciones de
-  $e(X)$ para $D=0$ y $D=1$ difieren de forma apreciable, generando pesos IPW muy grandes en
-  algunas regiones de $X$. Sin capping, el tamaño efectivo de muestra (ESS) para $D=0$ es
-  reducido, lo que aumenta varianza. Capar pesos (p95, p99 o valor fijo) mejora el ESS a costa
-  de introducir algo de sesgo, por eso reporta diagnósticos de overlap, distribución de pesos
-  y sensibilidad del desempeño a la regla de capping.
+\noindent\textbf{Soporte común imperfecto (overlap) y pesos extremos:} las distribuciones de
+$e(X)$ para $D=0$ y $D=1$ difieren de forma apreciable, generando pesos IPW muy grandes en
+algunas regiones de $X$. Sin capping, el tamaño efectivo de muestra (ESS) para $D=0$ es
+reducido, lo que aumenta varianza. Capar pesos (p95, p99 o valor fijo) mejora el ESS a costa
+de introducir algo de sesgo, por eso reporta diagnósticos de overlap, distribución de pesos
+y sensibilidad del desempeño a la regla de capping.
 
-  \item \textbf{Calibración de probabilidades:} aunque la calidad de ranking es buena
-  (particularmente en Random Forest), las curvas de calibración muestran que los modelos
-  tienden a sobreestimar el riesgo en los deciles altos. Para reglas basadas en umbrales
-  monetarios \(p^\ast\), la calibración se vuelve central, aquí solo se da un primer diagnóstico
-  con curvas de confiabilidad y Brier score.
+\noindent\textbf{Calibración de probabilidades:} aunque la calidad de ranking es buena
+(particularmente en Random Forest), las curvas de calibración muestran que los modelos
+tienden a sobreestimar el riesgo en los deciles altos. Para reglas basadas en umbrales
+monetarios \(p^\ast\), la calibración se vuelve central, aquí solo se da un primer diagnóstico
+con curvas de confiabilidad y Brier score.
 
-  \item \textbf{Validez externa y dataset shift:} los datos provienen de una sola ciudad
-  y de un periodo concreto, y el split 80/20 es aleatorio. Cambios en la agenda, en la política
-  de recordatorios o en la composición de pacientes pueden alterar la relación entre covariables
-  y ausentismo. En despliegue real se requiere monitoreo de drift y, posiblemente, reentrenamiento
-  periódico.
+\noindent\textbf{Validez externa y dataset shift:} los datos provienen de una sola ciudad
+y de un periodo concreto, y el split 80/20 es aleatorio. Cambios en la agenda, en la política
+de recordatorios o en la composición de pacientes pueden alterar la relación entre covariables
+y ausentismo. En despliegue real se requiere monitoreo de drift y, posiblemente, reentrenamiento
+periódico.
 
-\end{itemize}
 
 \subsection{Trabajo futuro}
 
-A partir de estos resultados, se ven varias extensiones:
+\noindent A partir de estos resultados, se ven varias extensiones:
 
-\begin{itemize}
-  \item \textbf{Calibración post-estimación:} aplicar métodos isotónicos o de Platt en un conjunto
-  de validación (tanto para el modelo estándar como para el score de política) y evaluar métricas
-  como Brier y Expected Calibration Error (ECE), además de \(\mathrm{P@}k\) (fue literatura que encontré pero no entendí bien).
+\noindent\textbf{Calibración post-estimación:} aplicar métodos isotónicos o de Platt en un conjunto
+de validación (tanto para el modelo estándar como para el score de política) y evaluar métricas
+como Brier y Expected Calibration Error (ECE), además de \(\mathrm{P@}k\) (fue literatura que encontré pero no entendí bien).
 
-  \item \textbf{Evaluación temporal y robustez a drift:} reemplazar el split aleatorio por un split
-  temporal (entrenar en meses iniciales y evaluar en meses posteriores) y monitorear la estabilidad
-  de AUC, \(\AP\) y \(\mathrm{P@}k\) a lo largo del tiempo.
+\noindent\textbf{Evaluación temporal y robustez a drift:} reemplazar el split aleatorio por un split
+temporal (entrenar en meses iniciales y evaluar en meses posteriores) y monitorear la estabilidad
+de AUC, \(\AP\) y \(\mathrm{P@}k\) a lo largo del tiempo.
 
-  \item \textbf{De scores a decisiones:} combinar el score $\widehat p_0(X)$ con información sobre
-  costos \(C\), beneficios \(b\) y una estimación causal del efecto \(\theta\) de SMS/llamada (idealmente
-  proveniente de un RCT, una discontinuidad de política o un instrumento válido) para derivar reglas
-  de intervención basadas en net benefit, por ejemplo vía Decision Curve Analysis.
+\noindent\textbf{De scores a decisiones:} combinar el score $\widehat p_0(X)$ con información sobre
+costos \(C\), beneficios \(b\) y una estimación causal del efecto \(\theta\) de SMS/llamada (idealmente
+proveniente de un RCT, una discontinuidad de política o un instrumento válido) para derivar reglas
+de intervención basadas en net benefit, por ejemplo vía Decision Curve Analysis.
 
-  \item \textbf{Modelos adicionales y comparación:} explorar variantes gradiente (GBDT, XGBoost/LightGBM)
-  y otros modelos tabulares competitivos, manteniendo el mismo protocolo de evaluación fuera de muestra
-  y los mismos diagnósticos de overlap, pesos y calibración.
-\end{itemize}
+\noindent\textbf{Modelos adicionales y comparación:} explorar variantes gradiente (GBDT, XGBoost/LightGBM)
+y otros modelos tabulares competitivos, manteniendo el mismo protocolo de evaluación fuera de muestra
+y los mismos diagnósticos de overlap, pesos y calibración.
+
 
 \subsection{Reproducibilidad}
 
