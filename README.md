@@ -21,8 +21,6 @@ El objetivo es predecir la probabilidad de **no-show** (ausentismo) en citas mé
 
 ## 2. Estructura del repositorio
 
-Sugerida (puedes adaptarla a tu organización real):
-
 ```text
 .
 ├── Proyecto_final_TPAM.ipynb      # Notebook principal con todo el pipeline
@@ -47,7 +45,9 @@ Sugerida (puedes adaptarla a tu organización real):
 │   ├── topicos_proyecto_final.tex # Manuscrito en LaTeX
 │   └── topicos_proyecto_final.pdf # Versión final del artículo
 └── README.md
+
 3. Requisitos
+
 Python ≥ 3.9
 
 Librerías principales:
@@ -66,12 +66,12 @@ jupyter / notebook
 
 Instalación sugerida (una vez creado un entorno virtual):
 
-bash
-Copiar código
 pip install -r requirements.txt
 # o manualmente:
 pip install numpy pandas matplotlib seaborn scikit-learn jupyter
+
 4. Datos
+
 Crear la carpeta data/ en la raíz del repositorio.
 
 Descargar el dataset Medical Appointment No Shows desde Kaggle.
@@ -97,21 +97,22 @@ Eliminación de la única observación con edad negativa.
 Creación de la etiqueta binaria no_show.
 
 5. Cómo reproducir los resultados
+
 Clonar el repositorio:
 
-bash
-Copiar código
 git clone <URL_DEL_REPO>
 cd <carpeta_del_repo>
+
+
 Crear y activar un entorno virtual (opcional, pero recomendado).
 
 Instalar dependencias (ver sección 3).
 
 Lanzar Jupyter:
 
-bash
-Copiar código
 jupyter notebook
+
+
 Abrir Proyecto_final_TPAM.ipynb y ejecutar todas las celdas en orden.
 
 El notebook:
@@ -155,6 +156,7 @@ Importancia de variables por permutation importance.
 Todas las figuras se guardan en la carpeta figs/ y las tablas principales se imprimen en el notebook.
 
 6. Resultados principales (resumen)
+
 Desbalance: prevalencia de no-show ≈ 20 %.
 
 Modelos estándar (toda la muestra):
@@ -177,30 +179,7 @@ P@10% ≈ 0.42, P@20% ≈ 0.39
 
 El Random Forest domina a la logística tanto en AUC como en capacidad de concentrar no-shows en el top-k de riesgo.
 
-Score de política (estimación de 
-𝑝
-0
-(
-𝑋
-)
-=
-Pr
-⁡
-(
-𝑌
-=
-1
-∣
-𝑋
-,
-𝐷
-=
-0
-)
-p 
-0
-​
- (X)=Pr(Y=1∣X,D=0) con IPW y cap p99):
+Score de política (estimación de $p_0(X) = \Pr(Y=1 \mid X, D=0)$ con IPW y cap p99):
 
 Policy-LogReg:
 
@@ -216,21 +195,10 @@ Interpretación operativa:
 
 En un problema con prevalencia ≈20 %, P@10% ≈ 0.42–0.43 implica lifts de alrededor de 2–2.6 veces la línea base, es decir, el modelo permite concentrar buena parte de los no-shows en una fracción pequeña de pacientes priorizados.
 
-El score de política 
-𝑝
-^
-0
-(
-𝑋
-)
-p
-​
-  
-0
-​
- (X) está pensado para decisiones ex-ante (riesgo sin SMS), mientras que el modelo estándar refleja el régimen histórico de asignación de SMS.
+El score de política $\hat{p}_0(X)$ está pensado para decisiones ex-ante (riesgo sin SMS), mientras que el modelo estándar refleja el régimen histórico de asignación de SMS.
 
 7. Uso de IA y fuentes adicionales
+
 Los conceptos de propensity score, tamaño efectivo de muestra (ESS) y winsorización de pesos IPW no se trabajaron en detalle en el curso. Para poder explorar estas ideas y redactar los apéndices técnicos:
 
 Revisé bibliografía estándar de inferencia causal (IPW, overlap, ESS).
@@ -246,6 +214,7 @@ Sugerencias de gráficos/tablas de robustez.
 El procesamiento de datos, la implementación concreta en el notebook, la elección de escenarios de sensibilidad (sin cap, p95, p99, cap 20) y la validación de resultados fueron realizados por mí. Esta parte del proyecto debe verse como material complementario de aprendizaje y no como contenido central del curso.
 
 8. Créditos
+
 Autor del proyecto: Carlos Castillo.
 
 Curso: TPAM (Proyecto final, 2025-II).
@@ -255,11 +224,6 @@ Dataset:
 J. Aroba – Medical Appointment No Shows (Kaggle).
 
 Software: Python, scikit-learn y ecosistema científico estándar.
-
-Si usas este código o documento como base para otros trabajos, por favor cita el dataset original y el reporte asociado a este repositorio.
-
-makefile
-Copiar código
 
 Este README condensa lo que cuentas en el artículo (datos, pipeline, métricas, score de política, IPW, calibración) y deja explícito el uso de IA como apoyo en la parte más avanzada del apéndice. 
 ::contentReference[oaicite:1]{index=1}
